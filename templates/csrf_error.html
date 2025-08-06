@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+
+{% block title %}CSRF Error{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row">
+        <div class="col-md-8 offset-md-2">
+            <div class="card">
+                <div class="card-header bg-danger text-white">
+                    <h4>CSRF Validation Error</h4>
+                </div>
+                <div class="card-body">
+                    <p>A Cross-Site Request Forgery (CSRF) validation error occurred. This could be due to:</p>
+                    <ul>
+                        <li>Your session may have expired</li>
+                        <li>The form was submitted from an unauthorized source</li>
+                        <li>The CSRF token was missing or invalid</li>
+                    </ul>
+                    <p><strong>Error details:</strong> {{ reason }}</p>
+                    <hr>
+                    <p>Please try the following:</p>
+                    <ul>
+                        <li>Go back and refresh the page</li>
+                        <li>Try logging in again</li>
+                        <li>Clear your browser cache and cookies</li>
+                    </ul>
+                    <div class="mt-4">
+                        <a href="{{ url_for('main.index') }}" class="btn btn-primary">Return to Home</a>
+                        <a href="javascript:history.back()" class="btn btn-secondary ml-2">Go Back</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

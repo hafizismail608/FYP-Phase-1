@@ -1,0 +1,145 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h2 class="fw-bold">AI Chatbot Assistant</h2>
+        </div>
+    </div>
+    <div class="row mb-4 justify-content-center">
+        <div class="col-md-8">
+            <div class="card shadow-sm" style="min-height: 400px;">
+                <div class="card-body d-flex flex-column" style="height: 400px;">
+                    <div class="flex-grow-1 mb-3" id="chat-messages" style="overflow-y: auto;">
+                        <!-- Chat messages will appear here -->
+                    </div>
+                    <form class="d-flex mt-auto" id="chat-form" autocomplete="off">
+                        <input type="text" class="form-control me-2" id="chat-input" placeholder="Type your message..." required>
+                        <button class="btn btn-primary" type="submit">Send</button>
+                    </form>
+                    <div id="chat-loading" class="text-center mt-2" style="display:none;">
+                        <div class="spinner-border text-primary" role="status">
+                          <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <span class="ms-2">AI is thinking...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    // Determine role-based endpoint
+    let chatEndpoint = window.location.pathname.startsWith('/instructor') ? '/instructor/ai-chatbot' : '/student/ai-chatbot';
+    const chatForm = document.getElementById('chat-form');
+    const chatInput = document.getElementById('chat-input');
+    const chatMessages = document.getElementById('chat-messages');
+    const chatLoading = document.getElementById('chat-loading');
+
+    function appendMessage(sender, text) {
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'mb-2' + (sender === 'You' ? ' text-end' : '');
+        
+        // Create the badge for the sender
+        const badge = document.createElement('span');
+        badge.className = `badge bg-${sender === 'You' ? 'secondary' : 'primary'}`;
+        badge.textContent = sender;
+        msgDiv.appendChild(badge);
+        
+        // Create a space after the badge
+        msgDiv.appendChild(document.createTextNode(' '));
+        
+        // Create the message content div that can contain HTML
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'mt-1';
+        contentDiv.style.display = 'inline-block';
+        contentDiv.style.textAlign = 'left';
+        contentDiv.style.maxWidth = '90%';
+        
+        // Add CSS for proper paragraph and heading spacing
+        const style = document.createElement('style');
+        style.textContent = `
+            .chat-content p {
+                margin-bottom: 0.8em;
+                line-height: 1.5;
+            }
+            .chat-content p:last-child {
+                margin-bottom: 0;
+            }
+            .chat-content strong {
+                display: block;
+                margin-top: 1em;
+                margin-bottom: 0.5em;
+                font-size: 1.1em;
+            }
+        `;
+        document.head.appendChild(style);
+        contentDiv.classList.add('chat-content');
+        
+        // Set the HTML content safely
+        contentDiv.innerHTML = text;
+        
+        // Format code blocks if present
+        const codeBlocks = contentDiv.querySelectorAll('pre code');
+        if (codeBlocks.length > 0) {
+            codeBlocks.forEach(block => {
+                block.style.display = 'block';
+                block.style.padding = '10px';
+                block.style.backgroundColor = '#f8f9fa';
+                block.style.borderRadius = '4px';
+                block.style.overflowX = 'auto';
+            });
+        }
+        
+        msgDiv.appendChild(contentDiv);
+        chatMessages.appendChild(msgDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // Add greeting message when page loads
+    window.addEventListener('DOMContentLoaded', function() {
+    const greeting = "Hello! I'm your AI learning assistant. I can help you with:<br>" +
+                     "• Course-related questions<br>" +
+                     "• Assignment guidance<br>" +
+                     "• Study tips and resources<br>" +
+                     "• General learning support<br><br>" +
+                     "How can I assist you today?";
+    appendMessage('AI', greeting);
+});
+
+
+    chatForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const message = chatInput.value.trim();
+        if (!message) return;
+        appendMessage('You', message);
+        chatInput.value = '';
+        chatInput.disabled = true;
+        chatLoading.style.display = 'block';
+        fetch(chatEndpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            },
+            body: JSON.stringify({ message })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.response) {
+                appendMessage('AI', data.response);
+            } else {
+                appendMessage('AI', data.error || 'Sorry, something went wrong.');
+            }
+        })
+        .catch(() => {
+            appendMessage('AI', 'Sorry, there was a network error.');
+        })
+        .finally(() => {
+            chatInput.disabled = false;
+            chatInput.focus();
+            chatLoading.style.display = 'none';
+        });
+    });
+</script>
+{% endblock %}
