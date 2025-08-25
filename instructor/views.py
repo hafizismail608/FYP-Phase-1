@@ -1,25 +1,58 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, jsonify
+from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, jsonify, send_from_directory
 from flask_login import login_required, current_user
-from models import User, Course, Enrollment, Assignment, Grade, Discussion, Announcement, Quiz, Outcome, Module, Attachment, Question, Meeting, Event, EmotionLog, QuizSubmission, QuizAnswer, AssignmentSubmission
+from models import User, Course, Enrollment, Assignment, Grade, Discussion, Announcement, Quiz, Outcome, Module, Attachment, Question, Meeting, Event, EmotionLog, QuizSubmission, QuizAnswer, AssignmentSubmission, Lecture, LectureLike, LectureShare
 from app import db
 from flask_wtf import FlaskForm
-from wtforms import StringField, TextAreaField, SubmitField, SelectField, FieldList, FormField, IntegerField, DateTimeField
-from wtforms.validators import DataRequired
+from flask_wtf.file import FileField, FileAllowed, FileRequired
+from wtforms import StringField, TextAreaField, SubmitField, SelectField, FieldList, FormField, IntegerField, DateTimeField, BooleanField
+from wtforms.validators import DataRequired, Length, Optional
 import os
+import subprocess
 from werkzeug.utils import secure_filename
 import google.generativeai as genai
 from services.gemini_service import GeminiService
 import json
+import uuid
 from datetime import datetime
+import requests
+from services.tts_service import TTSService
+from services.subtitle_service import SubtitleService
+from app import csrf
 
 instructor_bp = Blueprint('instructor', __name__, url_prefix='/instructor')
 
 # Get the absolute path to the uploads directory
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'uploads')
+VIDEO_FOLDER = os.path.join(UPLOAD_FOLDER, 'lectures')
+THUMBNAIL_FOLDER = os.path.join(UPLOAD_FOLDER, 'thumbnails')
+SUBTITLE_FOLDER = os.path.join(UPLOAD_FOLDER, 'subtitles')
+
+# Create directories if they don't exist
+os.makedirs(VIDEO_FOLDER, exist_ok=True)
+os.makedirs(THUMBNAIL_FOLDER, exist_ok=True)
+os.makedirs(SUBTITLE_FOLDER, exist_ok=True)
+
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'zip', 'rar'}
+ALLOWED_VIDEO_EXTENSIONS = {'mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'}
+ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def allowed_video_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_VIDEO_EXTENSIONS
+
+def allowed_image_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
+
+class LectureForm(FlaskForm):
+    title = StringField('Title', validators=[DataRequired(), Length(min=3, max=100)])
+    description = TextAreaField('Description', validators=[Optional(), Length(max=1000)])
+    course_id = SelectField('Course', coerce=int, validators=[DataRequired()])
+    video = FileField('Video File', validators=[FileRequired(), FileAllowed(list(ALLOWED_VIDEO_EXTENSIONS), 'Videos only!')])
+    thumbnail = FileField('Thumbnail (Optional)', validators=[Optional(), FileAllowed(list(ALLOWED_IMAGE_EXTENSIONS), 'Images only!')])
+    is_published = BooleanField('Publish Immediately', default=True)
+    submit = SubmitField('Upload Lecture')
 
 @instructor_bp.route('/dashboard')
 @login_required
@@ -39,12 +72,16 @@ def dashboard():
     # Fetch discussions
     discussions = Discussion.query.join(Course).filter(Course.instructor_id == current_user.id).order_by(Discussion.created_at.desc()).limit(5).all()
     
+    # Fetch recent lectures
+    lectures = Lecture.query.filter_by(instructor_id=current_user.id).order_by(Lecture.created_at.desc()).limit(5).all()
+    
     return render_template('instructor_dashboard.html', 
                            courses=courses,
                            announcements=announcements,
                            assignments=assignments,
                            grades=grades,
-                           discussions=discussions)
+                           discussions=discussions,
+                           lectures=lectures)
 
 @instructor_bp.route('/courses')
 @login_required
@@ -52,6 +89,422 @@ def courses():
     # Fetch courses taught by the instructor
     courses = Course.query.filter_by(instructor_id=current_user.id).all()
     return render_template('courses.html', courses=courses)
+
+@instructor_bp.route('/lectures')
+@login_required
+def lectures():
+    # Fetch all lectures by the instructor
+    lectures = Lecture.query.filter_by(instructor_id=current_user.id).order_by(Lecture.created_at.desc()).all()
+    return render_template('instructor/lectures.html', lectures=lectures)
+
+@instructor_bp.route('/lectures/create', methods=['GET', 'POST'])
+@login_required
+def create_lecture():
+    form = LectureForm()
+    # Populate course choices
+    form.course_id.choices = [(c.id, c.title) for c in Course.query.filter_by(instructor_id=current_user.id).all()]
+    
+    if form.validate_on_submit():
+        try:
+            # Handle video upload
+            video_file = form.video.data
+            video_filename = secure_filename(f"{uuid.uuid4()}_{video_file.filename}")
+            video_path = os.path.join(VIDEO_FOLDER, video_filename)
+            video_file.save(video_path)
+            
+            # Handle thumbnail upload if provided
+            thumbnail_path = None
+            if form.thumbnail.data:
+                thumbnail_file = form.thumbnail.data
+                thumbnail_filename = secure_filename(f"{uuid.uuid4()}_{thumbnail_file.filename}")
+                thumbnail_path = os.path.join(THUMBNAIL_FOLDER, thumbnail_filename)
+                thumbnail_file.save(thumbnail_path)
+            else:
+                # Generate thumbnail from video (first frame)
+                thumbnail_filename = f"{uuid.uuid4()}.jpg"
+                thumbnail_path = os.path.join(THUMBNAIL_FOLDER, thumbnail_filename)
+                try:
+                    subprocess.run([
+                        'ffmpeg', '-i', video_path, '-ss', '00:00:01', '-frames:v', '1',
+                        thumbnail_path
+                    ], check=True)
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    # If ffmpeg fails or is not available, use a default thumbnail
+                    pass
+            
+            # Create new lecture record
+            lecture = Lecture(
+                title=form.title.data,
+                description=form.description.data,
+                course_id=form.course_id.data,
+                instructor_id=current_user.id,
+                video_path=os.path.join('uploads', 'lectures', video_filename),
+                thumbnail_path=os.path.join('uploads', 'thumbnails', os.path.basename(thumbnail_path)) if thumbnail_path else None,
+                is_published=form.is_published.data
+            )
+            
+            db.session.add(lecture)
+            db.session.commit()
+            
+            # Generate subtitles and auto-dubbing
+            try:
+                # Generate subtitles using Vosk
+                subtitle_service = SubtitleService()
+                generated_vtt = subtitle_service.generate_subtitles(video_path, SUBTITLE_FOLDER)
+                if generated_vtt:
+                    lecture.subtitle_path = os.path.join('uploads', 'subtitles', generated_vtt)
+                
+                # Generate auto-dubbing
+                try:
+                    tts_service = TTSService()
+                    dubbed_out_dir = os.path.join(UPLOAD_FOLDER, 'dubbed_videos')
+                    os.makedirs(dubbed_out_dir, exist_ok=True)
+                    dubbed_video_filename = tts_service.generate_dubbing(
+                        video_path=video_path,
+                        output_dir=dubbed_out_dir
+                    )
+                    
+                    if dubbed_video_filename:
+                        relative_dubbed_path = os.path.join('dubbed_videos', dubbed_video_filename).replace('\\','/')
+                        lecture.dubbed_video_path = f"uploads/{relative_dubbed_path}"
+                    
+                except Exception as dubbing_error:
+                    print(f"Auto-dubbing failed: {dubbing_error}")
+                    # Continue without dubbing if it fails
+                
+                db.session.commit()
+                
+            except Exception as e:
+                # Log the error but don't fail the upload
+                print(f"Error generating subtitles/dubbing: {str(e)}")
+                # In production, you might want to queue this for retry
+            
+            flash('Lecture uploaded successfully!', 'success')
+            return redirect(url_for('instructor.lectures'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error uploading lecture: {str(e)}', 'danger')
+    
+    return render_template('instructor/create_lecture.html', form=form)
+
+@instructor_bp.route('/lectures/upload_progress', methods=['POST'])
+@login_required
+def upload_progress():
+    """Handle chunked video upload with progress tracking"""
+    try:
+        # Get upload session data
+        upload_id = request.form.get('upload_id')
+        chunk_number = int(request.form.get('chunk_number', 0))
+        total_chunks = int(request.form.get('total_chunks', 1))
+        filename = request.form.get('filename')
+        
+        # Get the uploaded chunk
+        chunk = request.files.get('chunk')
+        if not chunk:
+            return jsonify({'error': 'No chunk uploaded'}), 400
+        
+        # Create upload directory if it doesn't exist
+        upload_dir = os.path.join(VIDEO_FOLDER, 'temp', upload_id)
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        # Save the chunk
+        chunk_path = os.path.join(upload_dir, f'chunk_{chunk_number}')
+        chunk.save(chunk_path)
+        
+        # Calculate progress
+        progress = ((chunk_number + 1) / total_chunks) * 100
+        
+        # If this is the last chunk, combine all chunks
+        if chunk_number == total_chunks - 1:
+            final_filename = secure_filename(f"{uuid.uuid4()}_{filename}")
+            final_path = os.path.join(VIDEO_FOLDER, final_filename)
+            
+            # Combine chunks
+            with open(final_path, 'wb') as final_file:
+                for i in range(total_chunks):
+                    chunk_file_path = os.path.join(upload_dir, f'chunk_{i}')
+                    with open(chunk_file_path, 'rb') as chunk_file:
+                        final_file.write(chunk_file.read())
+            
+            # Clean up temporary chunks
+            import shutil
+            shutil.rmtree(upload_dir)
+            
+            return jsonify({
+                'progress': 100,
+                'status': 'complete',
+                'filename': final_filename,
+                'message': 'Upload completed successfully'
+            })
+        
+        return jsonify({
+            'progress': progress,
+            'status': 'uploading',
+            'message': f'Uploaded chunk {chunk_number + 1} of {total_chunks}'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@instructor_bp.route('/lectures/create_with_upload', methods=['POST'])
+@login_required
+def create_lecture_with_upload():
+    """Create lecture after successful chunked upload"""
+    try:
+        # Get form data
+        title = request.form.get('title')
+        description = request.form.get('description')
+        course_id = int(request.form.get('course_id'))
+        is_published = request.form.get('is_published') == 'true'
+        video_filename = request.form.get('video_filename')
+        
+        if not all([title, course_id, video_filename]):
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        # Handle thumbnail upload if provided
+        thumbnail_path = None
+        if 'thumbnail' in request.files:
+            thumbnail_file = request.files['thumbnail']
+            if thumbnail_file.filename:
+                thumbnail_filename = secure_filename(f"{uuid.uuid4()}_{thumbnail_file.filename}")
+                thumbnail_path = os.path.join(THUMBNAIL_FOLDER, thumbnail_filename)
+                thumbnail_file.save(thumbnail_path)
+        
+        if not thumbnail_path:
+            # Generate thumbnail from video (first frame)
+            video_path = os.path.join(VIDEO_FOLDER, video_filename)
+            thumbnail_filename = f"{uuid.uuid4()}.jpg"
+            thumbnail_path = os.path.join(THUMBNAIL_FOLDER, thumbnail_filename)
+            try:
+                subprocess.run([
+                    'ffmpeg', '-i', video_path, '-ss', '00:00:01', '-frames:v', '1',
+                    thumbnail_path
+                ], check=True)
+            except (subprocess.SubprocessError, FileNotFoundError):
+                thumbnail_path = None
+        
+        # Create new lecture record
+        lecture = Lecture(
+            title=title,
+            description=description,
+            course_id=course_id,
+            instructor_id=current_user.id,
+            video_path=os.path.join('uploads', 'lectures', video_filename),
+            thumbnail_path=os.path.join('uploads', 'thumbnails', os.path.basename(thumbnail_path)) if thumbnail_path else None,
+            is_published=is_published
+        )
+        
+        db.session.add(lecture)
+        db.session.commit()
+        
+        # Generate subtitles asynchronously (simplified for demo)
+        try:
+            # Generate subtitles using Vosk
+            video_path = os.path.join(VIDEO_FOLDER, video_filename)
+            subtitle_service = SubtitleService()
+            generated_vtt = subtitle_service.generate_subtitles(video_path, SUBTITLE_FOLDER)
+            if generated_vtt:
+                lecture.subtitle_path = os.path.join('uploads', 'subtitles', generated_vtt)
+            db.session.commit()
+        except Exception as e:
+            print(f"Error generating subtitles: {str(e)}")
+        
+        # Generate dubbing asynchronously (best-effort)
+        try:
+            tts_service = TTSService()
+            dubbed_out_dir = os.path.join(UPLOAD_FOLDER, 'dubbed_videos')
+            os.makedirs(dubbed_out_dir, exist_ok=True)
+            dubbed_video_filename = tts_service.generate_dubbing(
+                video_path=video_path,
+                output_dir=dubbed_out_dir
+            )
+            if dubbed_video_filename:
+                relative_dubbed_path = os.path.join('dubbed_videos', dubbed_video_filename).replace('\\','/')
+                lecture.dubbed_video_path = f"uploads/{relative_dubbed_path}"
+                db.session.commit()
+        except Exception as e:
+            print(f"Error generating dubbing: {str(e)}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Lecture created successfully!',
+            'lecture_id': lecture.id,
+            'redirect_url': url_for('instructor.lectures')
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@instructor_bp.route('/lectures/<int:lecture_id>')
+@login_required
+def view_lecture(lecture_id):
+    lecture = Lecture.query.get_or_404(lecture_id)
+    
+    # Check if the current user is the instructor of this lecture
+    if lecture.instructor_id != current_user.id:
+        flash('You do not have permission to view this lecture.', 'danger')
+        return redirect(url_for('instructor.lectures'))
+    
+    # Increment view count
+    lecture.view_count += 1
+    db.session.commit()
+    
+    # Get like count
+    like_count = LectureLike.query.filter_by(lecture_id=lecture_id).count()
+    
+    # Check if current user has liked this lecture
+    user_liked = LectureLike.query.filter_by(lecture_id=lecture_id, user_id=current_user.id).first() is not None
+    
+    return render_template('instructor/view_lecture.html', lecture=lecture, like_count=like_count, user_liked=user_liked)
+
+@instructor_bp.route('/lectures/<int:lecture_id>/edit', methods=['GET', 'POST'])
+@login_required
+def edit_lecture(lecture_id):
+    lecture = Lecture.query.get_or_404(lecture_id)
+    
+    # Check if the current user is the instructor of this lecture
+    if lecture.instructor_id != current_user.id:
+        flash('You do not have permission to edit this lecture.', 'danger')
+        return redirect(url_for('instructor.lectures'))
+    
+    form = LectureForm(obj=lecture)
+    form.course_id.choices = [(c.id, c.title) for c in Course.query.filter_by(instructor_id=current_user.id).all()]
+    
+    # Remove file field validators for edit form
+    form.video.validators = []
+    form.thumbnail.validators = []
+    
+    if form.validate_on_submit():
+        try:
+            # Update basic info
+            lecture.title = form.title.data
+            lecture.description = form.description.data
+            lecture.course_id = form.course_id.data
+            lecture.is_published = form.is_published.data
+            lecture.updated_at = datetime.utcnow()
+            
+            # Handle video upload if new video provided
+            if form.video.data:
+                video_file = form.video.data
+                video_filename = secure_filename(f"{uuid.uuid4()}_{video_file.filename}")
+                video_path = os.path.join(VIDEO_FOLDER, video_filename)
+                video_file.save(video_path)
+                
+                # Delete old video file if it exists
+                if lecture.video_path and os.path.exists(os.path.join(current_app.root_path, 'static', lecture.video_path)):
+                    os.remove(os.path.join(current_app.root_path, 'static', lecture.video_path))
+                
+                lecture.video_path = os.path.join('uploads', 'lectures', video_filename)
+                
+                # Reset subtitle path since we have a new video
+                lecture.subtitle_path = None
+            
+            # Handle thumbnail upload if provided
+            if form.thumbnail.data:
+                thumbnail_file = form.thumbnail.data
+                thumbnail_filename = secure_filename(f"{uuid.uuid4()}_{thumbnail_file.filename}")
+                thumbnail_path = os.path.join(THUMBNAIL_FOLDER, thumbnail_filename)
+                thumbnail_file.save(thumbnail_path)
+                
+                # Delete old thumbnail if it exists
+                if lecture.thumbnail_path and os.path.exists(os.path.join(current_app.root_path, 'static', lecture.thumbnail_path)):
+                    os.remove(os.path.join(current_app.root_path, 'static', lecture.thumbnail_path))
+                
+                lecture.thumbnail_path = os.path.join('uploads', 'thumbnails', thumbnail_filename)
+            
+            db.session.commit()
+            flash('Lecture updated successfully!', 'success')
+            return redirect(url_for('instructor.view_lecture', lecture_id=lecture.id))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error updating lecture: {str(e)}', 'danger')
+    
+    return render_template('instructor/edit_lecture.html', form=form, lecture=lecture)
+
+@instructor_bp.route('/lectures/<int:lecture_id>/delete', methods=['POST'])
+@login_required
+def delete_lecture(lecture_id):
+    lecture = Lecture.query.get_or_404(lecture_id)
+    
+    # Check if the current user is the instructor of this lecture
+    if lecture.instructor_id != current_user.id:
+        flash('You do not have permission to delete this lecture.', 'danger')
+        return redirect(url_for('instructor.lectures'))
+    
+    try:
+        # Delete video file
+        if lecture.video_path and os.path.exists(os.path.join(current_app.root_path, 'static', lecture.video_path)):
+            os.remove(os.path.join(current_app.root_path, 'static', lecture.video_path))
+        
+        # Delete thumbnail
+        if lecture.thumbnail_path and os.path.exists(os.path.join(current_app.root_path, 'static', lecture.thumbnail_path)):
+            os.remove(os.path.join(current_app.root_path, 'static', lecture.thumbnail_path))
+        
+        # Delete subtitle file
+        if lecture.subtitle_path and os.path.exists(os.path.join(current_app.root_path, 'static', lecture.subtitle_path)):
+            os.remove(os.path.join(current_app.root_path, 'static', lecture.subtitle_path))
+        
+        # Delete lecture record (cascade will delete likes and shares)
+        db.session.delete(lecture)
+        db.session.commit()
+        
+        flash('Lecture deleted successfully!', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error deleting lecture: {str(e)}', 'danger')
+    
+    return redirect(url_for('instructor.lectures'))
+
+@instructor_bp.route('/lectures/<int:lecture_id>/like', methods=['POST'])
+@login_required
+def like_lecture(lecture_id):
+    lecture = Lecture.query.get_or_404(lecture_id)
+    
+    # Check if user already liked this lecture
+    existing_like = LectureLike.query.filter_by(lecture_id=lecture_id, user_id=current_user.id).first()
+    
+    if existing_like:
+        # Unlike if already liked
+        db.session.delete(existing_like)
+        db.session.commit()
+        return jsonify({'status': 'success', 'action': 'unliked', 'count': LectureLike.query.filter_by(lecture_id=lecture_id).count()})
+    else:
+        # Add new like
+        like = LectureLike(lecture_id=lecture_id, user_id=current_user.id)
+        db.session.add(like)
+        db.session.commit()
+        return jsonify({'status': 'success', 'action': 'liked', 'count': LectureLike.query.filter_by(lecture_id=lecture_id).count()})
+
+@instructor_bp.route('/lectures/<int:lecture_id>/share', methods=['POST'])
+@login_required
+def share_lecture(lecture_id):
+    lecture = Lecture.query.get_or_404(lecture_id)
+    shared_with = request.form.get('shared_with')
+    
+    # Record the share action
+    share = LectureShare(lecture_id=lecture_id, user_id=current_user.id, shared_with=shared_with)
+    db.session.add(share)
+    db.session.commit()
+    
+    return jsonify({'status': 'success', 'message': 'Lecture shared successfully'})
+
+@instructor_bp.route('/video/<path:filename>')
+@login_required
+def serve_video(filename):
+    return send_from_directory(os.path.join(current_app.root_path, 'uploads', 'lectures'), filename)
+
+@instructor_bp.route('/subtitle/<path:filename>')
+@login_required
+def serve_subtitle(filename):
+    return send_from_directory(os.path.join(current_app.root_path, 'uploads', 'subtitles'), filename)
+
+@instructor_bp.route('/thumbnail/<path:filename>')
+@login_required
+def serve_thumbnail(filename):
+    return send_from_directory(os.path.join(current_app.root_path, 'uploads', 'thumbnails'), filename)
 
 @instructor_bp.route('/calendar')
 @login_required
@@ -793,3 +1246,44 @@ def view_assignment_submissions(course_id, assignment_id):
     submissions = assignment.submissions
     course = Course.query.get_or_404(course_id)
     return render_template('instructor/view_assignment_submissions.html', assignment=assignment, submissions=submissions, course=course)
+
+@instructor_bp.route('/lectures/<int:lecture_id>/generate_subtitles', methods=['POST'])
+@login_required
+@csrf.exempt
+def generate_subtitles_for_lecture(lecture_id):
+    lecture = Lecture.query.get_or_404(lecture_id)
+    if lecture.instructor_id != current_user.id:
+        return jsonify({'error': 'Forbidden'}), 403
+    try:
+        video_abs = os.path.join(VIDEO_FOLDER, os.path.basename(lecture.video_path or ''))
+        subtitle_service = SubtitleService()
+        generated_vtt = subtitle_service.generate_subtitles(video_abs, SUBTITLE_FOLDER)
+        if generated_vtt:
+            lecture.subtitle_path = os.path.join('uploads', 'subtitles', generated_vtt)
+            db.session.commit()
+            return jsonify({'status': 'success', 'subtitle_path': lecture.subtitle_path})
+        return jsonify({'status': 'failed'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@instructor_bp.route('/lectures/<int:lecture_id>/generate_dubbing', methods=['POST'])
+@login_required
+@csrf.exempt
+def generate_dubbing_for_lecture(lecture_id):
+    lecture = Lecture.query.get_or_404(lecture_id)
+    if lecture.instructor_id != current_user.id:
+        return jsonify({'error': 'Forbidden'}), 403
+    try:
+        video_abs = os.path.join(VIDEO_FOLDER, os.path.basename(lecture.video_path or ''))
+        tts_service = TTSService()
+        dubbed_out_dir = os.path.join(UPLOAD_FOLDER, 'dubbed_videos')
+        os.makedirs(dubbed_out_dir, exist_ok=True)
+        dubbed_video_filename = tts_service.generate_dubbing(video_path=video_abs, output_dir=dubbed_out_dir)
+        if dubbed_video_filename:
+            relative_dubbed_path = os.path.join('dubbed_videos', dubbed_video_filename).replace('\\','/')
+            lecture.dubbed_video_path = f"uploads/{relative_dubbed_path}"
+            db.session.commit()
+            return jsonify({'status': 'success', 'dubbed_video_path': lecture.dubbed_video_path})
+        return jsonify({'status': 'failed'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

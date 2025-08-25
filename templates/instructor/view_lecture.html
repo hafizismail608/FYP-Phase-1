@@ -1,0 +1,135 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>{{ lecture.title }}</h2>
+        <div>
+            <a href="{{ url_for('instructor.edit_lecture', lecture_id=lecture.id) }}" class="btn btn-outline-secondary me-2"><i class="fas fa-edit"></i> Edit</a>
+            <a href="{{ url_for('instructor.lectures') }}" class="btn btn-outline-secondary"><i class="fas fa-arrow-left"></i> Back</a>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card mb-4">
+                <div class="card-body p-0">
+                    <div class="video-container position-relative" style="width: 100%;">
+                        <video id="lecture-video" class="w-100" controls preload="metadata" data-lecture-id="{{ lecture.id }}" poster="{% if lecture.thumbnail_path %}{{ url_for('instructor.serve_thumbnail', filename=lecture.thumbnail_path|basename) }}{% endif %}">
+                            <source id="videoSource" src="{{ url_for('uploaded_file', filename=lecture.video_path|uploads_rel) }}">
+                            {% if lecture.subtitle_path %}
+                            <track label="English" kind="subtitles" srclang="en" src="{{ url_for('uploaded_file', filename=lecture.subtitle_path|uploads_rel) }}" default>
+                            {% endif %}
+                            Your browser does not support the video tag.
+                        </video>
+                        <div class="position-absolute" style="top:10px; right:10px; z-index: 1000;">
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button id="btnGenSubs" type="button" class="btn btn-outline-light" onclick="generateSubs('{{ url_for('instructor.generate_subtitles_for_lecture', lecture_id=lecture.id) }}','btnGenSubs')">Auto Sub</button>
+                                <button id="btnGenDub" type="button" class="btn btn-outline-light" onclick="generateDub('{{ url_for('instructor.generate_dubbing_for_lecture', lecture_id=lecture.id) }}','btnGenDub')">Auto Dub</button>
+                                {% if lecture.dubbed_video_path %}
+                                <button id="btnToggleDub" type="button" class="btn btn-outline-light" onclick="toggleDub('{{ url_for('uploaded_file', filename=lecture.video_path|uploads_rel) }}','{{ url_for('uploaded_file', filename=lecture.dubbed_video_path|uploads_rel) }}','lecture-video','videoSource')">Use Dubbed</button>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <button id="fullscreen-btn" class="btn btn-sm btn-dark position-absolute" style="bottom: 10px; right: 10px; z-index: 100;">
+                            <i class="fas fa-expand"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="me-3"><i class="fas fa-eye"></i> {{ lecture.view_count }} views</span>
+                            <span class="me-3"><i class="fas fa-calendar"></i> {{ lecture.created_at.strftime('%Y-%m-%d') }}</span>
+                        </div>
+                        <div>
+                            <button id="like-btn" class="btn btn-sm {% if user_liked %}btn-primary{% else %}btn-outline-primary{% endif %} me-2" data-lecture-id="{{ lecture.id }}">
+                                <i class="fas fa-thumbs-up"></i> <span id="like-count">{{ lecture.likes|length }}</span>
+                            </button>
+                            <div class="dropdown d-inline-block">
+                                <button class="btn btn-sm btn-outline-info dropdown-toggle" type="button" id="shareDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                                    <i class="fas fa-share-alt"></i> Share
+                                </button>
+                                <ul class="dropdown-menu" aria-labelledby="shareDropdown">
+                                    <li><a class="dropdown-item share-btn" href="#" data-platform="email" data-lecture-id="{{ lecture.id }}"><i class="fas fa-envelope"></i> Email</a></li>
+                                    <li><a class="dropdown-item share-btn" href="#" data-platform="whatsapp" data-lecture-id="{{ lecture.id }}"><i class="fab fa-whatsapp"></i> WhatsApp</a></li>
+                                    <li><a class="dropdown-item share-btn" href="#" data-platform="facebook" data-lecture-id="{{ lecture.id }}"><i class="fab fa-facebook"></i> Facebook</a></li>
+                                    <li><a class="dropdown-item share-btn" href="#" data-platform="twitter" data-lecture-id="{{ lecture.id }}"><i class="fab fa-twitter"></i> Twitter</a></li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li>
+                                        <div class="dropdown-item">
+                                            <div class="input-group input-group-sm">
+                                                <input type="text" class="form-control" id="share-url" value="{{ request.url }}" readonly>
+                                                <button class="btn btn-outline-secondary" type="button" id="copy-url-btn"><i class="fas fa-copy"></i></button>
+                                            </div>
+                                        </div>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Lecture Details</h5>
+                </div>
+                <div class="card-body">
+                    <p><strong>Course:</strong> {{ lecture.course.title }}</p>
+                    <p><strong>Status:</strong> 
+                        {% if lecture.is_published %}
+                        <span class="badge bg-success">Published</span>
+                        {% else %}
+                        <span class="badge bg-warning text-dark">Draft</span>
+                        {% endif %}
+                    </p>
+                    <p><strong>Duration:</strong> {{ lecture.duration or 'N/A' }}</p>
+                    <p><strong>Description:</strong></p>
+                    <p>{{ lecture.description }}</p>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">More from this Course</h5>
+                </div>
+                <div class="card-body p-0">
+                    <ul class="list-group list-group-flush">
+                        {% for related_lecture in related_lectures %}
+                        <li class="list-group-item {% if related_lecture.id == lecture.id %}active{% endif %}">
+                            <div class="d-flex">
+                                <div class="flex-shrink-0">
+                                    {% if related_lecture.thumbnail_path %}
+                                    <img src="{{ url_for('instructor.serve_thumbnail', filename=related_lecture.thumbnail_path|basename) }}" alt="{{ related_lecture.title }}" width="60" height="45" style="object-fit: cover;">
+                                    {% else %}
+                                    <div class="bg-secondary text-white d-flex align-items-center justify-content-center" style="width: 60px; height: 45px;">
+                                        <i class="fas fa-video"></i>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                                <div class="flex-grow-1 ms-3">
+                                    <a href="{{ url_for('instructor.view_lecture', lecture_id=related_lecture.id) }}" class="{% if related_lecture.id == lecture.id %}text-white{% endif %}">
+                                        {{ related_lecture.title }}
+                                    </a>
+                                    <div class="small {% if related_lecture.id == lecture.id %}text-white-50{% else %}text-muted{% endif %}">
+                                        <i class="fas fa-eye"></i> {{ related_lecture.view_count }} views
+                                    </div>
+                                </div>
+                            </div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/lecture-player.js') }}"></script>
+<script src="{{ url_for('static', filename='js/lecture-tools.js') }}"></script>
+{% endblock %}

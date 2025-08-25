@@ -1,0 +1,184 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Edit Lecture</h2>
+        <div>
+            <a href="{{ url_for('instructor.view_lecture', lecture_id=lecture.id) }}" class="btn btn-outline-primary me-2">View Lecture</a>
+            <a href="{{ url_for('instructor.lectures') }}" class="btn btn-outline-secondary"><i class="fas fa-arrow-left"></i> Back to Lectures</a>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-body">
+                    <form method="post" enctype="multipart/form-data">
+                        {{ form.hidden_tag() }}
+                        
+                        <div class="mb-3">
+                            {{ form.title.label(class="form-label") }}
+                            {{ form.title(class="form-control" + (" is-invalid" if form.title.errors else "")) }}
+                            {% if form.title.errors %}
+                                <div class="invalid-feedback">
+                                    {% for error in form.title.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="mb-3">
+                            {{ form.description.label(class="form-label") }}
+                            {{ form.description(class="form-control" + (" is-invalid" if form.description.errors else ""), rows=4) }}
+                            {% if form.description.errors %}
+                                <div class="invalid-feedback">
+                                    {% for error in form.description.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="mb-3">
+                            {{ form.course_id.label(class="form-label") }}
+                            {{ form.course_id(class="form-select" + (" is-invalid" if form.course_id.errors else "")) }}
+                            {% if form.course_id.errors %}
+                                <div class="invalid-feedback">
+                                    {% for error in form.course_id.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Current Video</label>
+                            <div class="mb-2">
+                                <video width="320" height="180" controls>
+                                    <source src="{{ url_for('instructor.serve_video', filename=lecture.video_path.split('/')[-1]) }}" type="video/mp4">
+                                    Your browser does not support the video tag.
+                                </video>
+                            </div>
+                            {{ form.video.label(class="form-label") }}
+                            {{ form.video(class="form-control" + (" is-invalid" if form.video.errors else ""), accept="video/*") }}
+                            <small class="form-text text-muted">Leave empty to keep the current video.</small>
+                            {% if form.video.errors %}
+                                <div class="invalid-feedback">
+                                    {% for error in form.video.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Current Thumbnail</label>
+                            {% if lecture.thumbnail_path %}
+                            <div class="mb-2">
+                                <img src="{{ url_for('static', filename=lecture.thumbnail_path) }}" alt="Current thumbnail" style="max-width: 320px; max-height: 180px;">
+                            </div>
+                            {% else %}
+                            <p class="text-muted">No custom thumbnail (using auto-generated)</p>
+                            {% endif %}
+                            {{ form.thumbnail.label(class="form-label") }}
+                            {{ form.thumbnail(class="form-control" + (" is-invalid" if form.thumbnail.errors else ""), accept="image/*") }}
+                            <small class="form-text text-muted">Leave empty to keep the current thumbnail.</small>
+                            {% if form.thumbnail.errors %}
+                                <div class="invalid-feedback">
+                                    {% for error in form.thumbnail.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="mb-3 form-check">
+                            {{ form.is_published(class="form-check-input" + (" is-invalid" if form.is_published.errors else "")) }}
+                            {{ form.is_published.label(class="form-check-label") }}
+                            {% if form.is_published.errors %}
+                                <div class="invalid-feedback">
+                                    {% for error in form.is_published.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary">Save Changes</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">Lecture Statistics</h5>
+                </div>
+                <div class="card-body">
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            Views
+                            <span class="badge bg-primary rounded-pill">{{ lecture.view_count }}</span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            Likes
+                            <span class="badge bg-success rounded-pill">{{ lecture.likes|length }}</span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            Shares
+                            <span class="badge bg-info rounded-pill">{{ lecture.shares|length }}</span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            Created
+                            <span>{{ lecture.created_at.strftime('%Y-%m-%d') }}</span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            Last Updated
+                            <span>{{ lecture.updated_at.strftime('%Y-%m-%d') if lecture.updated_at else 'Never' }}</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="card mt-4">
+                <div class="card-header bg-danger text-white">
+                    <h5 class="mb-0">Danger Zone</h5>
+                </div>
+                <div class="card-body">
+                    <p>Permanently delete this lecture and all associated data.</p>
+                    <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deleteModal">
+                        Delete Lecture
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteModalLabel">Confirm Delete</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete the lecture "{{ lecture.title }}"?</p>
+                <p class="text-danger"><strong>Warning:</strong> This action cannot be undone. All associated data, including video, thumbnail, and subtitles will be permanently deleted.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form action="{{ url_for('instructor.delete_lecture', lecture_id=lecture.id) }}" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-danger">Delete Permanently</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

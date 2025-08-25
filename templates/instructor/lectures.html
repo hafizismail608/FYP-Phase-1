@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>My Lectures</h2>
+        <a href="{{ url_for('instructor.create_lecture') }}" class="btn btn-primary"><i class="fas fa-plus"></i> Upload New Lecture</a>
+    </div>
+
+    {% if lectures %}
+    <div class="row">
+        {% for lecture in lectures %}
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                {% if lecture.thumbnail_path %}
+                <img src="{{ url_for('instructor.serve_thumbnail', filename=lecture.thumbnail_path|basename) }}" class="card-img-top" alt="{{ lecture.title }}" style="height: 180px; object-fit: cover;">
+                {% else %}
+                <div class="card-img-top bg-secondary text-white d-flex align-items-center justify-content-center" style="height: 180px;">
+                    <i class="fas fa-video fa-3x"></i>
+                </div>
+                {% endif %}
+                <div class="card-body">
+                    <h5 class="card-title">{{ lecture.title }}</h5>
+                    <p class="card-text text-muted small">{{ lecture.course.title }}</p>
+                    <p class="card-text">{{ lecture.description|truncate(100) }}</p>
+                </div>
+                <div class="card-footer bg-white">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <small class="text-muted">{{ lecture.created_at.strftime('%Y-%m-%d') }}</small>
+                        <div>
+                            <span class="badge bg-primary me-1"><i class="fas fa-eye"></i> {{ lecture.view_count }}</span>
+                            <span class="badge bg-success me-1"><i class="fas fa-thumbs-up"></i> {{ lecture.likes|length }}</span>
+                            <span class="badge bg-info"><i class="fas fa-share"></i> {{ lecture.shares|length }}</span>
+                        </div>
+                    </div>
+                    <div class="mt-2 d-flex justify-content-between">
+                        <a href="{{ url_for('instructor.view_lecture', lecture_id=lecture.id) }}" class="btn btn-sm btn-outline-primary">View</a>
+                        <div>
+                            <a href="{{ url_for('instructor.edit_lecture', lecture_id=lecture.id) }}" class="btn btn-sm btn-outline-secondary"><i class="fas fa-edit"></i></a>
+                            <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteModal{{ lecture.id }}"><i class="fas fa-trash"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Delete Modal -->
+        <div class="modal fade" id="deleteModal{{ lecture.id }}" tabindex="-1" aria-labelledby="deleteModalLabel{{ lecture.id }}" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="deleteModalLabel{{ lecture.id }}">Confirm Delete</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        Are you sure you want to delete the lecture "{{ lecture.title }}"? This action cannot be undone.
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <form action="{{ url_for('instructor.delete_lecture', lecture_id=lecture.id) }}" method="post">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-danger">Delete</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="alert alert-info">
+        <p>You haven't uploaded any lectures yet. <a href="{{ url_for('instructor.create_lecture') }}">Upload your first lecture</a>.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

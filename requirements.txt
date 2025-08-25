@@ -33,3 +33,7 @@ thread6
 Flask-SocketIO>=5.0
 # eventlet is recommended for Flask-SocketIO
 eventlet>=0.33 
+
+edge-tts>=6.1.9
+pyttsx3>=2.90
+vosk>=0.3.45 

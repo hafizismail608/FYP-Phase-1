@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+
+{% block title %}{{ lecture.title }} - Student Portal{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row">
+        <!-- Main Video Content -->
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-body p-0">
+                    <!-- Video Player -->
+                    <div class="video-container position-relative">
+                        <video id="lectureVideo" class="w-100" controls 
+                               poster="{% if lecture.thumbnail_path %}{{ url_for('instructor.serve_thumbnail', filename=lecture.thumbnail_path|basename) }}{% endif %}"
+                               style="max-height: 500px; object-fit: contain; background: #000;">
+                            {% if lecture.dubbed_video_path %}
+                            <source id="videoSource" src="{{ url_for('uploaded_file', filename=lecture.dubbed_video_path|uploads_rel) }}">
+                            {% else %}
+                            <source id="videoSource" src="{{ url_for('uploaded_file', filename=lecture.video_path|uploads_rel) }}">
+                            {% endif %}
+                            {% if lecture.subtitle_path %}
+                            <track label="English" kind="subtitles" srclang="en" src="{{ url_for('uploaded_file', filename=lecture.subtitle_path|uploads_rel) }}" default>
+                            {% endif %}
+                            Your browser does not support the video tag.
+                        </video>
+                        {% if lecture.dubbed_video_path %}
+                        <div class="position-absolute" style="top:10px; right:10px;">
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button id="btnOriginal" class="btn btn-outline-light active">Original</button>
+                                <button id="btnDubbed" class="btn btn-outline-light">Dubbed</button>
+                            </div>
+                        </div>
+                        {% endif %}
+                        
+                        <!-- Video Controls Overlay -->
+                        <div class="video-controls position-absolute" style="bottom: 10px; right: 10px;">
+                            <button class="btn btn-sm btn-dark me-2" onclick="toggleFullscreen()" title="Fullscreen">
+                                <i class="fas fa-expand"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Lecture Info -->
+            <div class="card mt-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <h3 class="card-title mb-2">{{ lecture.title }}</h3>
+                            <p class="text-muted mb-2">
+                                <i class="fas fa-eye me-1"></i> {{ lecture.view_count }} views
+                                {% if lecture.duration %}
+                                    <span class="ms-3"><i class="fas fa-clock me-1"></i> {{ lecture.duration }}</span>
+                                {% endif %}
+                                <span class="ms-3"><i class="fas fa-calendar me-1"></i> {{ lecture.created_at.strftime('%B %d, %Y') }}</span>
+                            </p>
+                        </div>
+                        <div class="d-flex align-items-center">
+                            <!-- Like Button -->
+                            <button class="btn btn-outline-primary me-2" id="likeBtn" onclick="toggleLike()">
+                                <i class="fas fa-heart" id="likeIcon"></i>
+                                <span id="likeCount">{{ like_count }}</span>
+                            </button>
+                            
+                            <!-- Share Button -->
+                            <button class="btn btn-outline-secondary" onclick="shareVideo()">
+                                <i class="fas fa-share"></i> Share
+                            </button>
+                        </div>
+                    </div>
+                    
+                    {% if lecture.description %}
+                    <div class="mt-3">
+                        <h5>Description</h5>
+                        <p class="text-muted">{{ lecture.description }}</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Sidebar -->
+        <div class="col-lg-4">
+            <!-- Course Info -->
+            <div class="card mb-3">
+                <div class="card-body">
+                    <h5 class="card-title">Course</h5>
+                    <h6 class="text-primary">{{ lecture.course.title }}</h6>
+                    <p class="text-muted small mb-2">{{ lecture.course.description[:100] }}...</p>
+                    <a href="{{ url_for('student.course_detail', course_id=lecture.course.id) }}" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-arrow-left me-1"></i> Back to Course
+                    </a>
+                </div>
+            </div>
+            
+            <!-- Related Lectures -->
+            {% if related_lectures %}
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">More from this Course</h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="list-group list-group-flush">
+                        {% for related_lecture in related_lectures %}
+                        <a href="{{ url_for('student.view_lecture', course_id=lecture.course.id, lecture_id=related_lecture.id) }}" 
+                           class="list-group-item list-group-item-action">
+                            <div class="d-flex align-items-center">
+                                {% if related_lecture.thumbnail_path %}
+                                <img src="{{ url_for('static', filename=related_lecture.thumbnail_path.split('/')[-1]) }}" 
+                                     class="me-3 rounded" style="width: 60px; height: 40px; object-fit: cover;" 
+                                     alt="{{ related_lecture.title }}">
+                                {% else %}
+                                <div class="me-3 bg-secondary rounded d-flex align-items-center justify-content-center" 
+                                     style="width: 60px; height: 40px;">
+                                    <i class="fas fa-play text-white"></i>
+                                </div>
+                                {% endif %}
+                                <div class="flex-grow-1">
+                                    <h6 class="mb-1">{{ related_lecture.title }}</h6>
+                                    <small class="text-muted">
+                                        <i class="fas fa-eye me-1"></i> {{ related_lecture.view_count }} views
+                                        {% if related_lecture.duration %}
+                                            <span class="ms-2">{{ related_lecture.duration }}</span>
+                                        {% endif %}
+                                    </small>
+                                </div>
+                            </div>
+                        </a>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+// Initialize like button state
+document.addEventListener('DOMContentLoaded', function() {
+    const userLiked = {{ user_liked|tojson }};
+    const likeBtn = document.getElementById('likeBtn');
+    const likeIcon = document.getElementById('likeIcon');
+    
+    if (userLiked) {
+        likeBtn.classList.remove('btn-outline-primary');
+        likeBtn.classList.add('btn-primary');
+        likeIcon.style.color = '#fff';
+    }
+});
+
+// Toggle like function
+function toggleLike() {
+    fetch(`{{ url_for('student.like_lecture', course_id=lecture.course.id, lecture_id=lecture.id) }}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token() }}'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            const likeBtn = document.getElementById('likeBtn');
+            const likeIcon = document.getElementById('likeIcon');
+            const likeCount = document.getElementById('likeCount');
+            
+            likeCount.textContent = data.count;
+            
+            if (data.action === 'liked') {
+                likeBtn.classList.remove('btn-outline-primary');
+                likeBtn.classList.add('btn-primary');
+                likeIcon.style.color = '#fff';
+            } else {
+                likeBtn.classList.remove('btn-primary');
+                likeBtn.classList.add('btn-outline-primary');
+                likeIcon.style.color = '';
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+    });
+}
+
+// Fullscreen toggle
+function toggleFullscreen() {
+    const video = document.getElementById('lectureVideo');
+    if (video.requestFullscreen) {
+        video.requestFullscreen();
+    } else if (video.webkitRequestFullscreen) {
+        video.webkitRequestFullscreen();
+    } else if (video.msRequestFullscreen) {
+        video.msRequestFullscreen();
+    }
+}
+
+// Share function
+function shareVideo() {
+    const url = window.location.href;
+    const title = '{{ lecture.title }}';
+    
+    if (navigator.share) {
+        navigator.share({
+            title: title,
+            url: url
+        });
+    } else {
+        // Fallback: copy to clipboard
+        navigator.clipboard.writeText(url).then(() => {
+            alert('Link copied to clipboard!');
+        });
+    }
+}
+</script>
+{% if lecture.dubbed_video_path %}
+<script>
+(function(){
+  const btnOriginal = document.getElementById('btnOriginal');
+  const btnDubbed = document.getElementById('btnDubbed');
+  const video = document.getElementById('lectureVideo');
+  const source = document.getElementById('videoSource');
+  if (btnOriginal && btnDubbed && video && source) {
+    const originalUrl = "{{ url_for('uploaded_file', filename=lecture.video_path|uploads_rel) }}";
+    const dubbedUrl = "{{ url_for('uploaded_file', filename=lecture.dubbed_video_path|uploads_rel) }}";
+    btnOriginal.addEventListener('click', function(){
+      btnOriginal.classList.add('active');
+      btnDubbed.classList.remove('active');
+      if (source.src !== originalUrl) { source.src = originalUrl; video.load(); video.play(); }
+    });
+    btnDubbed.addEventListener('click', function(){
+      btnDubbed.classList.add('active');
+      btnOriginal.classList.remove('active');
+      if (source.src !== dubbedUrl) { source.src = dubbedUrl; video.load(); video.play(); }
+    });
+  }
+})();
+</script>
+{% endif %}
+{% endblock %}

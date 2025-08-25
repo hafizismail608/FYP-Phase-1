@@ -344,6 +344,39 @@
                                     <p class="text-muted">Course content will be added by your instructor.</p>
                                 </div>
                             {% endif %}
+
+                            <hr class="my-4">
+                            <h5 class="card-title mb-3"><i class="fas fa-video me-2"></i>Lectures</h5>
+                            {% if lectures %}
+                            <div class="row">
+                                {% for lecture in lectures %}
+                                <div class="col-md-6 col-lg-4 mb-4">
+                                    <div class="card h-100">
+                                        <div class="position-relative">
+                                            {% if lecture.thumbnail_path %}
+                                            <img src="{{ url_for('instructor.serve_thumbnail', filename=lecture.thumbnail_path|basename) }}" class="card-img-top" alt="{{ lecture.title }}" style="height: 180px; object-fit: cover;">
+                                            {% else %}
+                                            <div class="bg-dark text-white d-flex align-items-center justify-content-center" style="height: 180px;">
+                                                <i class="fas fa-play fa-2x"></i>
+                                            </div>
+                                            {% endif %}
+                                        </div>
+                                        <div class="card-body d-flex flex-column">
+                                            <h6 class="card-title">{{ lecture.title }}</h6>
+                                            <p class="card-text text-muted small mb-2">{{ lecture.description[:80] if lecture.description else '' }}{% if lecture.description and lecture.description|length > 80 %}...{% endif %}</p>
+                                            <div class="mt-auto d-grid">
+                                                <a href="{{ url_for('student.view_lecture', course_id=course.id, lecture_id=lecture.id) }}" class="btn btn-primary btn-sm">
+                                                    <i class="fas fa-play me-1"></i>Watch
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                                <div class="text-center py-4 text-muted">No lectures published yet.</div>
+                            {% endif %}
                         </div>
                     </div>
                 </div>

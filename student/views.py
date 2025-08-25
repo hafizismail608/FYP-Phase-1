@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, current_app
 from flask_login import login_required, current_user
-from models import User, Course, Enrollment, Assignment, Grade, Discussion, Announcement, Meeting, InstructorProfile, StudentProfile, Quiz, Question, QuizSubmission, Module, Attachment, QuizAnswer, EmotionLog, Event, AssignmentSubmission
+from models import User, Course, Enrollment, Assignment, Grade, Discussion, Announcement, Meeting, InstructorProfile, StudentProfile, Quiz, Question, QuizSubmission, Module, Attachment, QuizAnswer, EmotionLog, Event, AssignmentSubmission, Lecture, LectureLike
 from app import db
 from services.gemini_service import GeminiService
 from datetime import datetime, timedelta
@@ -272,6 +272,7 @@ def course_detail(course_id):
     announcements = Announcement.query.filter_by(course_id=course_id).order_by(Announcement.created_at.desc()).all()
     attachments = Attachment.query.filter_by(course_id=course_id).order_by(Attachment.uploaded_at.desc()).all()
     meetings = Meeting.query.filter_by(course_id=course_id).order_by(Meeting.scheduled_time).all()
+    lectures = Lecture.query.filter_by(course_id=course_id, is_published=True).order_by(Lecture.created_at.desc()).all()
     
     # Get student's quiz submissions and scores
     quiz_submissions = QuizSubmission.query.filter_by(student_id=current_user.id).join(Quiz).filter(Quiz.course_id == course_id).all()
@@ -396,6 +397,7 @@ def course_detail(course_id):
                          announcements=announcements,
                          attachments=attachments,
                          meetings=meetings,
+                         lectures=lectures,
                          current_time=current_time,
                          quiz_scores=quiz_scores,
                          assignment_grades=assignment_grades,
@@ -405,6 +407,61 @@ def course_detail(course_id):
                          recent_activity=recent_activity,
                          course_stats=course_stats,
                          timedelta=timedelta)
+
+@student_bp.route('/courses/<int:course_id>/lectures/<int:lecture_id>')
+@login_required
+def view_lecture(course_id, lecture_id):
+    # Check if student is enrolled in the course
+    enrollment = Enrollment.query.filter_by(student_id=current_user.id, course_id=course_id).first()
+    if not enrollment:
+        flash('You are not enrolled in this course.', 'danger')
+        return redirect(url_for('student.courses'))
+    
+    # Get the lecture and verify it's published and belongs to the course
+    lecture = Lecture.query.filter_by(id=lecture_id, course_id=course_id, is_published=True).first_or_404()
+    
+    # Increment view count
+    lecture.view_count += 1
+    db.session.commit()
+    
+    # Get related lectures from the same course
+    related_lectures = Lecture.query.filter_by(course_id=course_id, is_published=True).filter(Lecture.id != lecture_id).order_by(Lecture.created_at.desc()).limit(10).all()
+    
+    # Get like count and check if current user has liked this lecture
+    like_count = LectureLike.query.filter_by(lecture_id=lecture_id).count()
+    user_liked = LectureLike.query.filter_by(lecture_id=lecture_id, user_id=current_user.id).first() is not None
+    
+    return render_template('student/view_lecture.html', 
+                         lecture=lecture, 
+                         related_lectures=related_lectures,
+                         like_count=like_count, 
+                         user_liked=user_liked)
+
+@student_bp.route('/courses/<int:course_id>/lectures/<int:lecture_id>/like', methods=['POST'])
+@login_required
+def like_lecture(course_id, lecture_id):
+    # Check if student is enrolled in the course
+    enrollment = Enrollment.query.filter_by(student_id=current_user.id, course_id=course_id).first()
+    if not enrollment:
+        return jsonify({'status': 'error', 'message': 'Not enrolled in course'}), 403
+    
+    # Get the lecture and verify it's published and belongs to the course
+    lecture = Lecture.query.filter_by(id=lecture_id, course_id=course_id, is_published=True).first_or_404()
+    
+    # Check if user already liked this lecture
+    existing_like = LectureLike.query.filter_by(lecture_id=lecture_id, user_id=current_user.id).first()
+    
+    if existing_like:
+        # Unlike if already liked
+        db.session.delete(existing_like)
+        db.session.commit()
+        return jsonify({'status': 'success', 'action': 'unliked', 'count': LectureLike.query.filter_by(lecture_id=lecture_id).count()})
+    else:
+        # Add new like
+        like = LectureLike(lecture_id=lecture_id, user_id=current_user.id)
+        db.session.add(like)
+        db.session.commit()
+        return jsonify({'status': 'success', 'action': 'liked', 'count': LectureLike.query.filter_by(lecture_id=lecture_id).count()})
 
 @student_bp.route('/suggest_tutor', methods=['GET', 'POST'])
 @login_required

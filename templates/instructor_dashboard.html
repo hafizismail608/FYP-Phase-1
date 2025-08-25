@@ -53,5 +53,48 @@
     {% else %}
     <p>You are not teaching any courses yet.</p>
     {% endif %}
+    
+    <hr>
+    <div class="d-flex justify-content-between align-items-center">
+        <h4>Your Lectures</h4>
+        <a href="{{ url_for('instructor.create_lecture') }}" class="btn btn-primary btn-sm">Upload New Lecture</a>
+    </div>
+    
+    {% if lectures %}
+    <div class="row mt-3">
+        {% for lecture in lectures %}
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                {% if lecture.thumbnail_path %}
+                <img src="{{ url_for('instructor.serve_thumbnail', filename=lecture.thumbnail_path|basename) }}" class="card-img-top" alt="{{ lecture.title }}" style="height: 180px; object-fit: cover;">
+                {% else %}
+                <div class="card-img-top bg-secondary text-white d-flex align-items-center justify-content-center" style="height: 180px;">
+                    <i class="fas fa-video fa-3x"></i>
+                </div>
+                {% endif %}
+                <div class="card-body">
+                    <h5 class="card-title">{{ lecture.title }}</h5>
+                    <p class="card-text text-muted small">{{ lecture.course.title }}</p>
+                    <p class="card-text">{{ lecture.description|truncate(100) }}</p>
+                </div>
+                <div class="card-footer bg-white d-flex justify-content-between">
+                    <small class="text-muted">{{ lecture.created_at.strftime('%Y-%m-%d') }}</small>
+                    <div>
+                        <span class="badge bg-primary"><i class="fas fa-eye"></i> {{ lecture.view_count }}</span>
+                        <a href="{{ url_for('instructor.view_lecture', lecture_id=lecture.id) }}" class="btn btn-sm btn-outline-primary ms-2">View</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    <div class="text-end mt-2">
+        <a href="{{ url_for('instructor.lectures') }}" class="btn btn-link">View All Lectures</a>
+    </div>
+    {% else %}
+    <div class="alert alert-info mt-3">
+        <p>You haven't uploaded any lectures yet. <a href="{{ url_for('instructor.create_lecture') }}">Upload your first lecture</a>.</p>
+    </div>
+    {% endif %}
 </div>
-{% endblock %} 
+{% endblock %}

@@ -10,13 +10,12 @@ import json
 import os
 from flask_socketio import SocketIO, emit
 import eventlet
-try:
-    from deepface import DeepFace
-    DEEPFACE_AVAILABLE = True
-except ImportError:
-    DEEPFACE_AVAILABLE = False
-    print("Warning: DeepFace not available. Emotion analysis will be disabled.")
-import cv2
+
+# Disable DeepFace and related imports to avoid TensorFlow issues
+DEEPFACE_AVAILABLE = False
+print("Warning: DeepFace not available. Emotion analysis will be disabled.")
+
+# Keep necessary imports
 import numpy as np
 import base64
 from datetime import datetime
@@ -39,6 +38,26 @@ def from_json_filter(s):
         return json.loads(s)
     except Exception:
         return []
+
+def uploads_rel_filter(p):
+    try:
+        if not p:
+            return ''
+        norm = str(p).replace('\\', '/')
+        if 'uploads/' in norm:
+            return norm.split('uploads/', 1)[1]
+        return norm.lstrip('/')
+    except Exception:
+        return p
+
+def basename_filter(p):
+    try:
+        if not p:
+            return ''
+        norm = str(p).replace('\\', '/')
+        return norm.rsplit('/', 1)[-1]
+    except Exception:
+        return p
 
 def create_app():
     app = Flask(__name__)
@@ -68,6 +87,8 @@ def create_app():
         return render_template('csrf_error.html', reason=e.description), 400
 
     app.jinja_env.filters['from_json'] = from_json_filter
+    app.jinja_env.filters['uploads_rel'] = uploads_rel_filter
+    app.jinja_env.filters['basename'] = basename_filter
 
     # Import and register blueprints
     from auth.views import auth_bp
@@ -163,8 +184,10 @@ def create_app():
             return redirect(url_for('main.index'))
 
     # Add route to serve uploaded files
-    @app.route('/uploads/<filename>')
+    @app.route('/uploads/<path:filename>')
     def uploaded_file(filename):
+        if filename.lower().endswith('.vtt'):
+            return send_from_directory(UPLOAD_FOLDER, filename, mimetype='text/vtt')
         return send_from_directory(UPLOAD_FOLDER, filename)
 
     # WebSocket handler for video/audio data

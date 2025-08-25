@@ -266,3 +266,37 @@ class EmotionLog(db.Model):
     focus_score = db.Column(db.Float)
     frustration_score = db.Column(db.Float)
     source_data_summary = db.Column(db.Text)
+
+class Lecture(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    course_id = db.Column(db.Integer, db.ForeignKey('course.id'), nullable=False)
+    instructor_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    video_path = db.Column(db.String(500), nullable=False)
+    thumbnail_path = db.Column(db.String(500), nullable=True)
+    duration = db.Column(db.Integer, nullable=True)  # Duration in seconds
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    subtitle_path = db.Column(db.String(500), nullable=True)
+    dubbed_video_path = db.Column(db.String(500), nullable=True)
+    is_published = db.Column(db.Boolean, default=True)
+    view_count = db.Column(db.Integer, default=0)
+    course = db.relationship('Course', backref='lectures')
+    instructor = db.relationship('User', backref='lectures')
+    likes = db.relationship('LectureLike', backref='lecture', lazy=True, cascade='all, delete-orphan')
+
+class LectureLike(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    lecture_id = db.Column(db.Integer, db.ForeignKey('lecture.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user = db.relationship('User', backref='lecture_likes')
+    
+class LectureShare(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    lecture_id = db.Column(db.Integer, db.ForeignKey('lecture.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    shared_with = db.Column(db.String(120), nullable=True)  # Email or platform where shared
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user = db.relationship('User', backref='lecture_shares')
